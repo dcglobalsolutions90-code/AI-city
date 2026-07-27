@@ -59,9 +59,13 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
-const GRID = 16;
+const GRID = 20;
 const TILE = 4;
 const HALF = GRID*TILE/2;
+const ROAD_SPACING = 5;
+const ROAD_LEN = GRID*TILE;
+
+function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x0b0f14, 0.012);
@@ -246,23 +250,17 @@ function clearTile(t){
   t.zone = null;
 }
 
-function buildResidentialCommercial(t, kind){
+// windowed box segment shared by every building style: solid box + emissive window overlay
+function makeWindowedBox(w, h, d, baseColor, winColor){
   const group = new THREE.Group();
-  const floors = kind==='commercial' ? Math.floor(rand(6,16)) : Math.floor(rand(2,7));
-  const floorH = kind==='commercial' ? 1.6 : 1.3;
-  const w = TILE*rand(0.55,0.8), d = TILE*rand(0.55,0.8);
-  const h = floors*floorH;
-  const baseColor = kind==='commercial' ? 0x1d2b3a : 0x2a2436;
   const mat = new THREE.MeshStandardMaterial({color:baseColor, roughness:0.75, metalness:0.1});
   const box = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
   box.position.y = h/2;
   group.add(box);
 
-  // window emissive strip texture
   const c = document.createElement('canvas'); c.width=32; c.height=64;
   const ctx = c.getContext('2d');
   ctx.fillStyle = '#0d0f16'; ctx.fillRect(0,0,32,64);
-  const winColor = kind==='commercial' ? 'rgba(150,215,255,0.95)' : 'rgba(255,205,150,0.85)';
   for(let y=3;y<64;y+=6){
     for(let x=3;x<32;x+=6){
       if(Math.random()<0.6){ ctx.fillStyle = winColor; ctx.fillRect(x,y,2.5,3); }
@@ -275,9 +273,58 @@ function buildResidentialCommercial(t, kind){
   const winBox = new THREE.Mesh(new THREE.BoxGeometry(w+0.02,h+0.02,d+0.02), winMat);
   winBox.position.y = h/2;
   group.add(winBox);
+  return group;
+}
+
+function buildResidentialCommercial(t, kind){
+  const group = new THREE.Group();
+  const floorH = kind==='commercial' ? 1.6 : 1.3;
+  const baseColor = kind==='commercial'
+    ? pick([0x1d2b3a, 0x223349, 0x1a2433])
+    : pick([0x2a2436, 0x332a40, 0x2c2230]);
+  const winColor = kind==='commercial' ? 'rgba(150,215,255,0.95)' : 'rgba(255,205,150,0.85)';
+  const style = kind==='commercial'
+    ? pick(['tower','tower','twin','slab'])
+    : pick(['slab','slab','slab','tower']);
+
+  let totalHeight;
+
+  if(style==='twin' && kind==='commercial'){
+    const w = TILE*rand(0.3,0.38), d = TILE*rand(0.55,0.75);
+    const hA = Math.floor(rand(8,18))*floorH, hB = Math.floor(rand(6,16))*floorH;
+    const gap = TILE*rand(0.12,0.22);
+    const towerA = makeWindowedBox(w,hA,d, baseColor, winColor);
+    towerA.position.x = -(w/2+gap/2);
+    group.add(towerA);
+    const towerB = makeWindowedBox(w,hB,d, baseColor, winColor);
+    towerB.position.x = (w/2+gap/2);
+    group.add(towerB);
+    totalHeight = Math.max(hA,hB);
+  } else if(style==='tower'){
+    let y = 0, w = TILE*rand(0.6,0.82), d = TILE*rand(0.6,0.82);
+    const baseFloors = kind==='commercial' ? Math.floor(rand(3,7)) : Math.floor(rand(2,4));
+    const base = makeWindowedBox(w, baseFloors*floorH, d, baseColor, winColor);
+    group.add(base);
+    y += baseFloors*floorH;
+    const tiers = kind==='commercial' ? Math.floor(rand(1,3)) : (Math.random()<0.35 ? 1 : 0);
+    for(let i=0;i<tiers;i++){
+      w *= rand(0.55,0.75); d *= rand(0.55,0.75);
+      const floors = Math.floor(rand(4, kind==='commercial' ? 16 : 5));
+      const seg = makeWindowedBox(w, floors*floorH, d, baseColor, winColor);
+      seg.position.y = y;
+      group.add(seg);
+      y += floors*floorH;
+    }
+    totalHeight = y;
+  } else {
+    const w = TILE*rand(0.55,0.8), d = TILE*rand(0.55,0.8);
+    const floors = kind==='commercial' ? Math.floor(rand(6,16)) : Math.floor(rand(2,7));
+    totalHeight = floors*floorH;
+    group.add(makeWindowedBox(w, totalHeight, d, baseColor, winColor));
+  }
 
   const light = new THREE.PointLight(kind==='commercial'?0x7fd0ff:0xffcf9e, 0.5, 8);
-  light.position.set(0, h*0.7, 0);
+  light.position.set(0, totalHeight*0.7, 0);
   light.visible = !isDay;
   group.add(light);
   buildingLights.push(light);
@@ -286,20 +333,54 @@ function buildResidentialCommercial(t, kind){
   group.position.set(t.x, 0, t.z);
   scene.add(group);
   t.group = group;
-  spawnAgent(t, h, kind==='commercial' ? 0x5be7ff : 0xffcf9e);
+  spawnAgent(t, totalHeight, kind==='commercial' ? 0x5be7ff : 0xffcf9e);
 }
 
 function buildIndustrial(t){
   const group = new THREE.Group();
-  const w = TILE*rand(0.7,0.9), d = TILE*rand(0.7,0.9), h = rand(2.5,5);
-  const mat = new THREE.MeshStandardMaterial({color:0x3a2f22, roughness:0.9});
-  const box = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
-  box.position.y = h/2;
-  group.add(box);
-  // smokestack
-  const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.25,0.3,h*1.6,10), new THREE.MeshStandardMaterial({color:0x22201c}));
-  stack.position.set(w*0.28, h*1.6/2, d*0.28);
-  group.add(stack);
+  const style = pick(['warehouse','silo','stack']);
+  const bodyMat = new THREE.MeshStandardMaterial({color:0x3a2f22, roughness:0.9});
+  let h;
+
+  if(style==='silo'){
+    const count = Math.floor(rand(2,4));
+    h = 0;
+    for(let i=0;i<count;i++){
+      const r = TILE*rand(0.14,0.2), hh = rand(2,4.5);
+      const silo = new THREE.Mesh(new THREE.CylinderGeometry(r,r,hh,12), new THREE.MeshStandardMaterial({color:0x555a5f, roughness:0.6, metalness:0.3}));
+      const ang = (i/count)*Math.PI*2 + rand(-0.2,0.2), dist = TILE*0.22;
+      silo.position.set(Math.cos(ang)*dist, hh/2, Math.sin(ang)*dist);
+      group.add(silo);
+      h = Math.max(h, hh);
+    }
+  } else if(style==='stack'){
+    const w = TILE*rand(0.5,0.7), d = TILE*rand(0.5,0.7);
+    h = rand(3,6);
+    const box = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), bodyMat);
+    box.position.y = h/2;
+    group.add(box);
+    const stackCount = Math.floor(rand(1,3));
+    for(let i=0;i<stackCount;i++){
+      const sh = h*rand(1.3,1.8);
+      const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.28,sh,10), new THREE.MeshStandardMaterial({color:0x22201c}));
+      stack.position.set((i-(stackCount-1)/2)*w*0.35, sh/2, d*0.25);
+      group.add(stack);
+      h = Math.max(h, sh);
+    }
+  } else {
+    const w = TILE*rand(0.75,0.92), d = TILE*rand(0.75,0.92);
+    h = rand(2,3.4);
+    const box = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), bodyMat);
+    box.position.y = h/2;
+    group.add(box);
+    const ventCount = Math.floor(rand(2,4));
+    for(let i=0;i<ventCount;i++){
+      const vent = new THREE.Mesh(new THREE.BoxGeometry(0.5,0.3,0.5), new THREE.MeshStandardMaterial({color:0x22201c}));
+      vent.position.set(rand(-w*0.3,w*0.3), h+0.15, rand(-d*0.3,d*0.3));
+      group.add(vent);
+    }
+  }
+
   group.position.set(t.x,0,t.z);
   scene.add(group);
   t.group = group;
@@ -371,16 +452,20 @@ function updateStats(){
 // ---------- seed a small starter city ----------
 function seedCity(){
   const layout = [];
-  // simple cross of roads
-  for(let i=0;i<GRID;i++){
-    layout.push([i, Math.floor(GRID/2), 'road']);
-    layout.push([Math.floor(GRID/2), i, 'road']);
-  }
-  const zonesPool = ['residential','residential','commercial','industrial','park'];
+  const roadCols = [], roadRows = [];
+  for(let g=0; g<GRID; g+=ROAD_SPACING){ roadCols.push(g); roadRows.push(g); }
+  const isRoadCol = new Set(roadCols), isRoadRow = new Set(roadRows);
+
   for(let gx=0; gx<GRID; gx++){
     for(let gz=0; gz<GRID; gz++){
-      if(gx===Math.floor(GRID/2) || gz===Math.floor(GRID/2)) continue;
-      if(Math.random()<0.55){
+      if(isRoadCol.has(gx) || isRoadRow.has(gz)) layout.push([gx,gz,'road']);
+    }
+  }
+  const zonesPool = ['residential','residential','residential','commercial','commercial','industrial','park'];
+  for(let gx=0; gx<GRID; gx++){
+    for(let gz=0; gz<GRID; gz++){
+      if(isRoadCol.has(gx) || isRoadRow.has(gz)) continue;
+      if(Math.random()<0.85){
         const z = zonesPool[Math.floor(Math.random()*zonesPool.length)];
         layout.push([gx,gz,z]);
       }
@@ -389,6 +474,72 @@ function seedCity(){
   layout.forEach(([gx,gz,zone])=>{
     const t = tiles.find(tt=>tt.gx===gx && tt.gz===gz);
     if(t) applyZone(t, zone);
+  });
+
+  spawnTraffic(roadCols, roadRows);
+}
+
+// ---------- traffic: cars + pedestrians looping along the main avenue grid ----------
+const movers = [];
+
+function makeCarMesh(){
+  const group = new THREE.Group();
+  const bodyColor = pick([0xd44b3c,0x3c78d4,0xdad64b,0xd4d4d4,0x4bd472,0x9a4bd4]);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.1,0.4,0.55), new THREE.MeshStandardMaterial({color:bodyColor, roughness:0.5, metalness:0.3}));
+  body.position.y = 0.2;
+  group.add(body);
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.55,0.28,0.5), new THREE.MeshStandardMaterial({color:0x1a2028, roughness:0.4}));
+  cabin.position.set(-0.05,0.47,0);
+  group.add(cabin);
+  return group;
+}
+
+function makePedMesh(){
+  const group = new THREE.Group();
+  const shirtColor = pick([0xd45b5b,0x5b8cd4,0xd4c95b,0x5bd48c,0xb45bd4,0xe0e0e0]);
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.15,0.5,8), new THREE.MeshStandardMaterial({color:shirtColor}));
+  body.position.y = 0.25;
+  group.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.13,8,8), new THREE.MeshStandardMaterial({color:0xe8c39e}));
+  head.position.y = 0.58;
+  group.add(head);
+  return group;
+}
+
+function spawnTraffic(roadCols, roadRows){
+  const carsPerLane = 2, pedsPerLane = 2;
+
+  roadCols.forEach(gx=>{
+    const x = tileCenter(gx,0)[0];
+    [1,-1].forEach(laneSign=>{
+      for(let i=0;i<carsPerLane;i++){
+        const mesh = makeCarMesh();
+        mesh.rotation.y = Math.PI/2;
+        scene.add(mesh);
+        movers.push({mesh, axis:'z', fixed:x + laneSign*TILE*0.16, speed: laneSign*rand(4,6), phase: Math.random()*ROAD_LEN, height:0.15});
+      }
+      for(let i=0;i<pedsPerLane;i++){
+        const mesh = makePedMesh();
+        scene.add(mesh);
+        movers.push({mesh, axis:'z', fixed:x + laneSign*TILE*0.44, speed: laneSign*rand(0.8,1.4), phase: Math.random()*ROAD_LEN, height:0.02});
+      }
+    });
+  });
+
+  roadRows.forEach(gz=>{
+    const z = tileCenter(0,gz)[1];
+    [1,-1].forEach(laneSign=>{
+      for(let i=0;i<carsPerLane;i++){
+        const mesh = makeCarMesh();
+        scene.add(mesh);
+        movers.push({mesh, axis:'x', fixed:z + laneSign*TILE*0.16, speed: laneSign*rand(4,6), phase: Math.random()*ROAD_LEN, height:0.15});
+      }
+      for(let i=0;i<pedsPerLane;i++){
+        const mesh = makePedMesh();
+        scene.add(mesh);
+        movers.push({mesh, axis:'x', fixed:z + laneSign*TILE*0.44, speed: laneSign*rand(0.8,1.4), phase: Math.random()*ROAD_LEN, height:0.02});
+      }
+    });
   });
 }
 
@@ -449,7 +600,7 @@ renderer.domElement.addEventListener('pointerup', e=>{
 
 // ---------- camera orbit ----------
 let isDown=false, prevX=0, prevY=0;
-let camAngle = 0.6, camElev = 0.55, camDist = 90;
+let camAngle = 0.6, camElev = 0.55, camDist = 120;
 renderer.domElement.addEventListener('pointerdown', e=>{isDown=true; prevX=e.clientX; prevY=e.clientY;});
 window.addEventListener('pointerup', ()=>isDown=false);
 window.addEventListener('pointermove', e=>{
@@ -462,7 +613,7 @@ window.addEventListener('pointermove', e=>{
   prevX=e.clientX; prevY=e.clientY;
 });
 renderer.domElement.addEventListener('wheel', e=>{
-  camDist = Math.min(220, Math.max(30, camDist + e.deltaY*0.08));
+  camDist = Math.min(280, Math.max(30, camDist + e.deltaY*0.08));
 });
 function updateCamera(){
   const y = camElev*70;
@@ -488,9 +639,23 @@ function animate(){
       a.timer = rand(3,7);
     }
     a.sprite.position.y = a.baseY + Math.sin(t*1.2+a.phase)*0.25;
+    a.light.visible = a.state !== 'idle';
     a.light.color.set(AGENT_STATES[a.state].glow);
     a.light.intensity = 0.6 + Math.sin(t*AGENT_STATES[a.state].pulse+a.phase)*0.35;
     drawAgentFace(a.sprite, a.state, t+a.phase);
+  });
+
+  movers.forEach(m=>{
+    let coord = (m.phase + t*m.speed) % ROAD_LEN;
+    if(coord < 0) coord += ROAD_LEN;
+    coord -= HALF;
+    if(m.axis==='z'){
+      m.mesh.position.set(m.fixed, m.height, coord);
+      m.mesh.rotation.y = (m.speed>0 ? 1 : -1) * Math.PI/2;
+    } else {
+      m.mesh.position.set(coord, m.height, m.fixed);
+      m.mesh.rotation.y = m.speed>0 ? 0 : Math.PI;
+    }
   });
 
   for(let i=commLines.length-1;i>=0;i--){
