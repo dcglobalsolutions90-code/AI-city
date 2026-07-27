@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>3D City Builder</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#0b0f14;font-family:'Segoe UI',Arial,sans-serif;}
+  canvas{display:block;}
+  #ui{
+    position:absolute; left:14px; top:14px; z-index:10;
+    background:rgba(10,14,20,.72); backdrop-filter:blur(6px);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:10px; padding:12px 14px; color:#dfe8f0;
+    font-size:13px; width:200px;
+  }
+  #ui h1{font-size:13px;letter-spacing:1.5px;text-transform:uppercase;margin:0 0 10px;color:#9fd8ff;font-weight:600;}
+  .tool{
+    display:flex; align-items:center; gap:8px;
+    padding:7px 8px; margin-bottom:4px; border-radius:6px; cursor:pointer;
+    border:1px solid transparent;
+  }
+  .tool:hover{background:rgba(255,255,255,.06);}
+  .tool.active{background:rgba(127,216,255,.15); border-color:rgba(127,216,255,.5);}
+  .swatch{width:12px;height:12px;border-radius:3px;flex:none;}
+  .stats{margin-top:12px; padding-top:10px; border-top:1px solid rgba(255,255,255,.1); font-size:12px; color:#b7c4d0;}
+  .stats div{display:flex; justify-content:space-between; margin-bottom:3px;}
+  .stats b{color:#eaf6ff;}
+  #hint{
+    position:absolute; left:14px; bottom:12px; z-index:10;
+    color:rgba(255,255,255,.45); font-size:11px; letter-spacing:1px; text-transform:uppercase;
+  }
+  #daynight{
+    position:absolute; right:14px; top:14px; z-index:10;
+    background:rgba(10,14,20,.72); border:1px solid rgba(255,255,255,.08);
+    border-radius:8px; padding:8px 12px; color:#dfe8f0; font-size:12px; cursor:pointer;
+    letter-spacing:1px; text-transform:uppercase;
+  }
+  #daynight:hover{background:rgba(255,255,255,.08);}
+</style>
+</head>
+<body>
+<div id="ui">
+  <h1>Zone Tool</h1>
+  <div class="tool active" data-zone="residential"><span class="swatch" style="background:#5be08a"></span>Residential</div>
+  <div class="tool" data-zone="commercial"><span class="swatch" style="background:#5bc8ff"></span>Commercial</div>
+  <div class="tool" data-zone="industrial"><span class="swatch" style="background:#ffb25b"></span>Industrial</div>
+  <div class="tool" data-zone="road"><span class="swatch" style="background:#8a8a96"></span>Road</div>
+  <div class="tool" data-zone="park"><span class="swatch" style="background:#2f9e4f"></span>Park</div>
+  <div class="tool" data-zone="bulldoze"><span class="swatch" style="background:#ff5c5c"></span>Bulldoze</div>
+  <div class="stats">
+    <div>Population <b id="statPop">0</b></div>
+    <div>Jobs <b id="statJobs">0</b></div>
+    <div>Tiles built <b id="statTiles">0</b></div>
+    <div>Active agents <b id="statAgents">0</b></div>
+  </div>
+</div>
+<div id="daynight">☀ Day</div>
+<div id="hint">click tiles to zone · drag to orbit · scroll to zoom</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const GRID = 16;
+const TILE = 4;
+const HALF = GRID*TILE/2;
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x0b0f14, 0.012);
+
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 800);
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+document.body.appendChild(renderer.domElement);
+
+// ---------- lighting ----------
+const ambient = new THREE.AmbientLight(0x8899bb, 0.6);
+scene.add(ambient);
+const sun = new THREE.DirectionalLight(0xfff2d8, 1.0);
+sun.position.set(60,90,40);
+scene.add(sun);
+
+let isDay = true;
+function applyTimeOfDay(){
+  if(isDay){
+    scene.background = new THREE.Color(0x9fd0e8);
+    scene.fog.color.set(0xbcd8ea);
+    ambient.intensity = 0.65; ambient.color.set(0x8899bb);
+    sun.intensity = 1.0; sun.color.set(0xfff2d8);
+    document.getElementById('daynight').textContent = '☀ Day';
+  } else {
+    scene.background = new THREE.Color(0x0a0e18);
+    scene.fog.color.set(0x0a0e18);
+    ambient.intensity = 0.35; ambient.color.set(0x445577);
+    sun.intensity = 0.35; sun.color.set(0x8fb0ff);
+    document.getElementById('daynight').textContent = '☾ Night';
+  }
+}
+applyTimeOfDay();
+document.getElementById('daynight').addEventListener('click', ()=>{
+  isDay = !isDay; applyTimeOfDay();
+  buildingLights.forEach(l => l.visible = !isDay);
+});
+
+// ---------- ground grid ----------
+const groundMat = new THREE.MeshStandardMaterial({color:0x2a3a2c, roughness:1});
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(GRID*TILE+40, GRID*TILE+40), groundMat);
+ground.rotation.x = -Math.PI/2;
+scene.add(ground);
+
+const gridHelper = new THREE.GridHelper(GRID*TILE, GRID, 0x668877, 0x445544);
+gridHelper.position.y = 0.02;
+scene.add(gridHelper);
+
+// invisible pickable tiles
+const tileGeo = new THREE.PlaneGeometry(TILE*0.96, TILE*0.96);
+const tileMatIdle = new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.0});
+const tiles = []; // {mesh, group, zone, x, z, buildingMesh, lights:[]}
+const buildingLights = [];
+
+function tileCenter(gx, gz){
+  return [ -HALF + gx*TILE + TILE/2, -HALF + gz*TILE + TILE/2 ];
+}
+
+for(let gx=0; gx<GRID; gx++){
+  for(let gz=0; gz<GRID; gz++){
+    const [x,z] = tileCenter(gx,gz);
+    const mesh = new THREE.Mesh(tileGeo, tileMatIdle.clone());
+    mesh.rotation.x = -Math.PI/2;
+    mesh.position.set(x, 0.03, z);
+    mesh.userData.gx = gx; mesh.userData.gz = gz;
+    scene.add(mesh);
+    tiles.push({mesh, zone:null, group:null, x, z, gx, gz});
+  }
+}
+
+// ---------- AI agent sprites ----------
+const AGENT_STATES = {
+  idle:    {color:'#7fa0b8', glow:0x7fa0b8, pulse:0.6},
+  thinking:{color:'#c9a0ff', glow:0xa06bff, pulse:1.4},
+  active:  {color:'#7fe0ff', glow:0x5be7ff, pulse:2.2}
+};
+const agents = [];
+
+function makeAgentSprite(){
+  const c = document.createElement('canvas'); c.width=128; c.height=128;
+  const ctx = c.getContext('2d');
+  const tex = new THREE.CanvasTexture(c);
+  const mat = new THREE.SpriteMaterial({map:tex, transparent:true, depthWrite:false});
+  const sprite = new THREE.Sprite(mat);
+  sprite.userData.canvas = c;
+  sprite.userData.ctx = ctx;
+  sprite.userData.tex = tex;
+  return sprite;
+}
+
+function drawAgentFace(sprite, stateKey, pulseT){
+  const ctx = sprite.userData.ctx;
+  const st = AGENT_STATES[stateKey];
+  ctx.clearRect(0,0,128,128);
+  const r = 34 + Math.sin(pulseT*st.pulse)*4;
+  const grd = ctx.createRadialGradient(64,60,4,64,64,r+20);
+  grd.addColorStop(0, st.color);
+  grd.addColorStop(1, 'rgba(10,20,30,0)');
+  ctx.fillStyle = grd;
+  ctx.beginPath(); ctx.arc(64,64,r+20,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle = st.color; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(64,64,r,0,Math.PI*2); ctx.stroke();
+  // small "eye" dot to read as a face/agent, not a plain orb
+  ctx.fillStyle = '#0d1420';
+  ctx.beginPath(); ctx.arc(64,64,r*0.4,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = st.color;
+  ctx.beginPath(); ctx.arc(64,64,r*0.16,0,Math.PI*2); ctx.fill();
+  sprite.userData.tex.needsUpdate = true;
+}
+
+function spawnAgent(t, h, kindColor){
+  const sprite = makeAgentSprite();
+  sprite.scale.set(2.2,2.2,1);
+  sprite.position.set(t.x, h + 1.6, t.z);
+  scene.add(sprite);
+
+  const light = new THREE.PointLight(kindColor, 0.9, 10);
+  light.position.set(t.x, h+1.6, t.z);
+  light.visible = true;
+  scene.add(light);
+
+  const agent = {
+    sprite, light, tile:t,
+    state:'idle', timer: rand(2,6), phase: Math.random()*10,
+    baseY: h+1.6
+  };
+  agents.push(agent);
+  t.agent = agent;
+  drawAgentFace(sprite, agent.state, 0);
+}
+
+function removeAgent(t){
+  if(!t.agent) return;
+  scene.remove(t.agent.sprite);
+  scene.remove(t.agent.light);
+  const idx = agents.indexOf(t.agent);
+  if(idx>-1) agents.splice(idx,1);
+  t.agent = null;
+}
+
+// occasional "communication" pulses between nearby agents
+const commLines = [];
+function tryStartComm(){
+  if(agents.length < 2) return;
+  const a = agents[Math.floor(Math.random()*agents.length)];
+  let nearest = null, nearestD = Infinity;
+  agents.forEach(b=>{
+    if(b===a) return;
+    const d = a.tile.x-b.tile.x, dz = a.tile.z-b.tile.z;
+    const dist = Math.sqrt(d*d+dz*dz);
+    if(dist < 30 && dist < nearestD){ nearestD = dist; nearest = b; }
+  });
+  if(!nearest) return;
+  const geo = new THREE.BufferGeometry().setFromPoints([
+    a.sprite.position.clone(), nearest.sprite.position.clone()
+  ]);
+  const mat = new THREE.LineBasicMaterial({color:0x8fd8ff, transparent:true, opacity:0.8});
+  const line = new THREE.Line(geo, mat);
+  scene.add(line);
+  commLines.push({line, life:1.0});
+  a.state = 'thinking'; a.timer = rand(1.5,3);
+  nearest.state = 'thinking'; nearest.timer = rand(1.5,3);
+}
+setInterval(tryStartComm, 1400);
+
+const zoneColors = {
+  residential: 0x5be08a,
+  commercial: 0x5bc8ff,
+  industrial: 0xffb25b,
+  road: 0x8a8a96,
+  park: 0x2f9e4f
+};
+
+function rand(a,b){ return a + Math.random()*(b-a); }
+
+function clearTile(t){
+  if(t.group){ scene.remove(t.group); t.group.traverse(o=>{ if(o.isMesh){o.geometry.dispose(); o.material.dispose();} }); t.group=null; }
+  t.lights && t.lights.forEach(l=>{ scene.remove(l); const idx=buildingLights.indexOf(l); if(idx>-1) buildingLights.splice(idx,1); });
+  t.lights = [];
+  removeAgent(t);
+  t.zone = null;
+}
+
+function buildResidentialCommercial(t, kind){
+  const group = new THREE.Group();
+  const floors = kind==='commercial' ? Math.floor(rand(6,16)) : Math.floor(rand(2,7));
+  const floorH = kind==='commercial' ? 1.6 : 1.3;
+  const w = TILE*rand(0.55,0.8), d = TILE*rand(0.55,0.8);
+  const h = floors*floorH;
+  const baseColor = kind==='commercial' ? 0x1d2b3a : 0x2a2436;
+  const mat = new THREE.MeshStandardMaterial({color:baseColor, roughness:0.75, metalness:0.1});
+  const box = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+  box.position.y = h/2;
+  group.add(box);
+
+  // window emissive strip texture
+  const c = document.createElement('canvas'); c.width=32; c.height=64;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#0d0f16'; ctx.fillRect(0,0,32,64);
+  const winColor = kind==='commercial' ? 'rgba(150,215,255,0.95)' : 'rgba(255,205,150,0.85)';
+  for(let y=3;y<64;y+=6){
+    for(let x=3;x<32;x+=6){
+      if(Math.random()<0.6){ ctx.fillStyle = winColor; ctx.fillRect(x,y,2.5,3); }
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(Math.max(1,w/2), Math.max(1,h/3));
+  const winMat = new THREE.MeshBasicMaterial({map:tex, transparent:true});
+  const winBox = new THREE.Mesh(new THREE.BoxGeometry(w+0.02,h+0.02,d+0.02), winMat);
+  winBox.position.y = h/2;
+  group.add(winBox);
+
+  const light = new THREE.PointLight(kind==='commercial'?0x7fd0ff:0xffcf9e, 0.5, 8);
+  light.position.set(0, h*0.7, 0);
+  light.visible = !isDay;
+  group.add(light);
+  buildingLights.push(light);
+  t.lights = [light];
+
+  group.position.set(t.x, 0, t.z);
+  scene.add(group);
+  t.group = group;
+  spawnAgent(t, h, kind==='commercial' ? 0x5be7ff : 0xffcf9e);
+}
+
+function buildIndustrial(t){
+  const group = new THREE.Group();
+  const w = TILE*rand(0.7,0.9), d = TILE*rand(0.7,0.9), h = rand(2.5,5);
+  const mat = new THREE.MeshStandardMaterial({color:0x3a2f22, roughness:0.9});
+  const box = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+  box.position.y = h/2;
+  group.add(box);
+  // smokestack
+  const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.25,0.3,h*1.6,10), new THREE.MeshStandardMaterial({color:0x22201c}));
+  stack.position.set(w*0.28, h*1.6/2, d*0.28);
+  group.add(stack);
+  group.position.set(t.x,0,t.z);
+  scene.add(group);
+  t.group = group;
+  spawnAgent(t, h, 0xffb25b);
+}
+
+function buildRoad(t){
+  const group = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({color:0x232329, roughness:0.7});
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(TILE*0.98,0.15,TILE*0.98), mat);
+  slab.position.y = 0.075;
+  group.add(slab);
+  const lineMat = new THREE.MeshBasicMaterial({color:0xf4e26a});
+  const line1 = new THREE.Mesh(new THREE.PlaneGeometry(0.2, TILE*0.9), lineMat);
+  line1.rotation.x=-Math.PI/2; line1.position.y=0.16;
+  group.add(line1);
+  group.position.set(t.x,0,t.z);
+  scene.add(group);
+  t.group = group;
+}
+
+function buildPark(t){
+  const group = new THREE.Group();
+  const grass = new THREE.Mesh(new THREE.CylinderGeometry(TILE*0.42,TILE*0.42,0.12,20), new THREE.MeshStandardMaterial({color:0x2f9e4f, roughness:1}));
+  grass.position.y = 0.06;
+  group.add(grass);
+  const treeCount = Math.floor(rand(2,5));
+  for(let i=0;i<treeCount;i++){
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.1,0.6,6), new THREE.MeshStandardMaterial({color:0x4a3222}));
+    const leaves = new THREE.Mesh(new THREE.SphereGeometry(0.45,8,8), new THREE.MeshStandardMaterial({color:0x2f7d3f}));
+    const ang = Math.random()*Math.PI*2, r = Math.random()*TILE*0.3;
+    trunk.position.set(Math.cos(ang)*r, 0.42, Math.sin(ang)*r);
+    leaves.position.set(trunk.position.x, 0.85, trunk.position.z);
+    group.add(trunk); group.add(leaves);
+  }
+  group.position.set(t.x,0,t.z);
+  scene.add(group);
+  t.group = group;
+}
+
+function applyZone(t, zone){
+  clearTile(t);
+  if(zone===null) { t.mesh.material.opacity=0; return; }
+  t.zone = zone;
+  if(zone==='residential') buildResidentialCommercial(t,'residential');
+  else if(zone==='commercial') buildResidentialCommercial(t,'commercial');
+  else if(zone==='industrial') buildIndustrial(t);
+  else if(zone==='road') buildRoad(t);
+  else if(zone==='park') buildPark(t);
+  updateStats();
+}
+
+// ---------- stats ----------
+function updateStats(){
+  let pop=0, jobs=0, built=0;
+  tiles.forEach(t=>{
+    if(!t.zone) return;
+    built++;
+    if(t.zone==='residential') pop += Math.floor(rand(40,90));
+    if(t.zone==='commercial') jobs += Math.floor(rand(20,60));
+    if(t.zone==='industrial') jobs += Math.floor(rand(15,40));
+  });
+  document.getElementById('statPop').textContent = pop;
+  document.getElementById('statJobs').textContent = jobs;
+  document.getElementById('statTiles').textContent = built;
+  document.getElementById('statAgents').textContent = agents.length;
+}
+
+// ---------- seed a small starter city ----------
+function seedCity(){
+  const layout = [];
+  // simple cross of roads
+  for(let i=0;i<GRID;i++){
+    layout.push([i, Math.floor(GRID/2), 'road']);
+    layout.push([Math.floor(GRID/2), i, 'road']);
+  }
+  const zonesPool = ['residential','residential','commercial','industrial','park'];
+  for(let gx=0; gx<GRID; gx++){
+    for(let gz=0; gz<GRID; gz++){
+      if(gx===Math.floor(GRID/2) || gz===Math.floor(GRID/2)) continue;
+      if(Math.random()<0.55){
+        const z = zonesPool[Math.floor(Math.random()*zonesPool.length)];
+        layout.push([gx,gz,z]);
+      }
+    }
+  }
+  layout.forEach(([gx,gz,zone])=>{
+    const t = tiles.find(tt=>tt.gx===gx && tt.gz===gz);
+    if(t) applyZone(t, zone);
+  });
+}
+seedCity();
+
+// ---------- tool selection ----------
+let currentZone = 'residential';
+document.querySelectorAll('.tool').forEach(el=>{
+  el.addEventListener('click', ()=>{
+    document.querySelectorAll('.tool').forEach(e=>e.classList.remove('active'));
+    el.classList.add('active');
+    currentZone = el.dataset.zone;
+  });
+});
+
+// ---------- raycasting for tile clicks ----------
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let dragStart = null;
+
+renderer.domElement.addEventListener('pointerdown', e=>{
+  dragStart = {x:e.clientX, y:e.clientY, t:performance.now()};
+});
+renderer.domElement.addEventListener('pointerup', e=>{
+  if(!dragStart) return;
+  const dx = e.clientX-dragStart.x, dy = e.clientY-dragStart.y;
+  const moved = Math.sqrt(dx*dx+dy*dy);
+  if(moved < 6){
+    mouse.x = (e.clientX/window.innerWidth)*2-1;
+    mouse.y = -(e.clientY/window.innerHeight)*2+1;
+    raycaster.setFromCamera(mouse, camera);
+    const hits = raycaster.intersectObjects(tiles.map(t=>t.mesh));
+    if(hits.length){
+      const gx = hits[0].object.userData.gx, gz = hits[0].object.userData.gz;
+      const t = tiles.find(tt=>tt.gx===gx && tt.gz===gz);
+      if(t){
+        if(currentZone==='bulldoze') applyZone(t, null);
+        else applyZone(t, currentZone);
+      }
+    }
+  }
+  dragStart = null;
+});
+
+// ---------- camera orbit ----------
+let isDown=false, prevX=0, prevY=0;
+let camAngle = 0.6, camElev = 0.55, camDist = 90;
+renderer.domElement.addEventListener('pointerdown', e=>{isDown=true; prevX=e.clientX; prevY=e.clientY;});
+window.addEventListener('pointerup', ()=>isDown=false);
+window.addEventListener('pointermove', e=>{
+  if(!isDown) return;
+  const dx = e.clientX-prevX, dy = e.clientY-prevY;
+  if(Math.sqrt(dx*dx+dy*dy) > 2){
+    camAngle -= dx*0.004;
+    camElev = Math.min(1.3, Math.max(0.15, camElev + dy*0.003));
+  }
+  prevX=e.clientX; prevY=e.clientY;
+});
+renderer.domElement.addEventListener('wheel', e=>{
+  camDist = Math.min(220, Math.max(30, camDist + e.deltaY*0.08));
+});
+function updateCamera(){
+  const y = camElev*70;
+  camera.position.set(Math.sin(camAngle)*camDist, y, Math.cos(camAngle)*camDist);
+  camera.lookAt(0, 4, 0);
+}
+
+const clock = new THREE.Clock();
+function animate(){
+  requestAnimationFrame(animate);
+  const dt = Math.min(0.05, clock.getDelta());
+  const t = clock.elapsedTime;
+
+  agents.forEach(a=>{
+    a.timer -= dt;
+    if(a.timer <= 0){
+      // cycle state: idle <-> active, occasionally thinking (thinking is set externally by comms)
+      if(a.state !== 'thinking'){
+        a.state = a.state==='idle' ? 'active' : 'idle';
+      } else {
+        a.state = 'active';
+      }
+      a.timer = rand(3,7);
+    }
+    a.sprite.position.y = a.baseY + Math.sin(t*1.2+a.phase)*0.25;
+    a.light.color.set(AGENT_STATES[a.state].glow);
+    a.light.intensity = 0.6 + Math.sin(t*AGENT_STATES[a.state].pulse+a.phase)*0.35;
+    drawAgentFace(a.sprite, a.state, t+a.phase);
+  });
+
+  for(let i=commLines.length-1;i>=0;i--){
+    const c = commLines[i];
+    c.life -= dt*0.6;
+    c.line.material.opacity = Math.max(0, c.life)*0.8;
+    if(c.life <= 0){
+      scene.remove(c.line);
+      c.line.geometry.dispose(); c.line.material.dispose();
+      commLines.splice(i,1);
+    }
+  }
+
+  updateCamera();
+  renderer.render(scene, camera);
+}
+animate();
+
+window.addEventListener('resize', ()=>{
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
