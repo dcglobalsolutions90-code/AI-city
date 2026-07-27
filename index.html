@@ -391,7 +391,22 @@ function seedCity(){
     if(t) applyZone(t, zone);
   });
 }
+
+// top up to a guaranteed minimum of visible agents, for demoing the AI-agent visuals
+function spawnDummyAgents(count){
+  const kindColors = [0x5be7ff, 0xffcf9e, 0xffb25b, 0xc9a0ff];
+  const available = tiles.filter(t => !t.agent);
+  for(let i=0; i<count && available.length; i++){
+    const idx = Math.floor(Math.random()*available.length);
+    const t = available.splice(idx,1)[0];
+    const h = t.zone ? rand(1,2) : rand(0.5,1.5);
+    spawnAgent(t, h, kindColors[Math.floor(Math.random()*kindColors.length)]);
+  }
+  updateStats();
+}
+
 seedCity();
+if(agents.length < 20) spawnDummyAgents(20 - agents.length);
 
 // ---------- tool selection ----------
 let currentZone = 'residential';
