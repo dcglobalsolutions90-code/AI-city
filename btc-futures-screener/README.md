@@ -63,9 +63,37 @@ first bar where it turns true) rather than one entry per bar.
   where N is `--volLookback`. A value of `200` means current volume is 3x the
   recent average.
 
+## Alternative: the tradingview-mcp connector
+
+This repo also registers [tradingview-mcp](https://github.com/atilaahmettaner/tradingview-mcp)
+as a project MCP server (see `.mcp.json` at the repo root) - a 37-tool
+TradingView/Yahoo Finance MCP server (`pip install tradingview-mcp-server` /
+`uvx --from tradingview-mcp-server tradingview-mcp`, no API key required). Once
+your MCP client (Claude Desktop, Claude Code, Cursor, etc.) picks up
+`.mcp.json` and has normal internet access, the same RSI-oversold +
+volume-spike screen can be asked directly as a tool call instead of running
+`screener.js`:
+
+- **`smart_volume_scanner`** is the closest built-in match: `exchange="BINANCE"`,
+  `rsi_range="oversold"` (RSI < 30), `min_volume_ratio=3.0` (current volume is
+  3x normal, i.e. +200%). This scans the crypto screener rather than futures
+  contracts specifically, so cross-check hits against:
+- **`futures_category_snapshot`** / **`coin_analysis`** (`exchange="BINANCE"`)
+  for a direct RSI + volume readout on a specific BTC futures symbol, and
+  **`futures_market_overview`** / **`futures_top_movers`** (`category="crypto_futures"`)
+  to see which BTC futures contracts are actively trading.
+
+Verified in this sandbox: the package installs cleanly via `uv tool install
+tradingview-mcp-server` and the server answers the MCP `initialize` /
+`tools/list` handshake correctly. Actual tool calls fail here with the same
+network restriction that blocks Binance's API directly (`scanner.tradingview.com`
+gets a 403 at this sandbox's proxy) - so, same as `screener.js` / `replay.js`,
+run it from an environment with normal outbound internet access to get live
+results.
+
 ## Note
 
-This script could not be run live from the sandboxed environment that
-generated it (outbound access to Binance's API was blocked by network
-policy there). Run it from an environment with normal internet access to get
-live results.
+`screener.js` / `replay.js` could not be run live from the sandboxed
+environment that generated them (outbound access to Binance's API was
+blocked by network policy there). Run them from an environment with normal
+internet access to get live results.
