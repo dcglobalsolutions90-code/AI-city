@@ -1,0 +1,707 @@
+<title>BTC Futures Replay — Sample Visualization</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page:        #f9f9f7;
+    --surface:     #fcfcfb;
+    --ink:         #0b0b0b;
+    --ink-2:       #52514e;
+    --ink-muted:   #898781;
+    --grid:        #e1e0d9;
+    --baseline:    #c3c2b7;
+    --price:       #2a78d6;
+    --price-fill:  rgba(42,120,214,.09);
+    --entry:       #eb6834;
+    --entry-fill:  rgba(235,104,52,.14);
+    --rsi:         #1baf7a;
+    --rsi-zone:    rgba(208,59,59,.08);
+    --rsi-line:    #d03b3b;
+    --good:        #006300;
+    --critical:    #d03b3b;
+    --ring:        var(--surface);
+    --border:      rgba(11,11,11,0.10);
+    --shadow:      0 1px 2px rgba(11,11,11,.04), 0 8px 24px rgba(11,11,11,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --page:        #0d0d0d;
+      --surface:     #1a1a19;
+      --ink:         #ffffff;
+      --ink-2:       #c3c2b7;
+      --ink-muted:   #898781;
+      --grid:        #2c2c2a;
+      --baseline:    #383835;
+      --price:       #3987e5;
+      --price-fill:  rgba(57,135,229,.14);
+      --entry:       #d95926;
+      --entry-fill:  rgba(217,89,38,.18);
+      --rsi:         #199e70;
+      --rsi-zone:    rgba(230,103,103,.10);
+      --rsi-line:    #e66767;
+      --good:        #0ca30c;
+      --critical:    #e66767;
+      --ring:        var(--surface);
+      --border:      rgba(255,255,255,.10);
+      --shadow:      0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page:        #0d0d0d;
+    --surface:     #1a1a19;
+    --ink:         #ffffff;
+    --ink-2:       #c3c2b7;
+    --ink-muted:   #898781;
+    --grid:        #2c2c2a;
+    --baseline:    #383835;
+    --price:       #3987e5;
+    --price-fill:  rgba(57,135,229,.14);
+    --entry:       #d95926;
+    --entry-fill:  rgba(217,89,38,.18);
+    --rsi:         #199e70;
+    --rsi-zone:    rgba(230,103,103,.10);
+    --rsi-line:    #e66767;
+    --good:        #0ca30c;
+    --critical:    #e66767;
+    --ring:        var(--surface);
+    --border:      rgba(255,255,255,.10);
+    --shadow:      0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { background: var(--page); }
+  body {
+    margin: 0;
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono {
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .page {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 40px 24px 64px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+
+  header.top { display: flex; flex-direction: column; gap: 10px; }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    align-self: flex-start;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--entry);
+    background: var(--entry-fill);
+    border: 1px solid color-mix(in srgb, var(--entry) 35%, transparent);
+    border-radius: 999px;
+    padding: 4px 10px 4px 8px;
+  }
+  .eyebrow::before { content: "●"; font-size: 8px; }
+  h1 {
+    margin: 0;
+    font-size: 26px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  .sub {
+    margin: 0;
+    max-width: 65ch;
+    color: var(--ink-2);
+    font-size: 14.5px;
+    line-height: 1.55;
+  }
+  .sub code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    background: var(--grid);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 13px;
+  }
+
+  .params-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .pill {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    font-size: 12.5px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 10px;
+    color: var(--ink-2);
+  }
+  .pill b {
+    color: var(--ink);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-weight: 600;
+  }
+
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    box-shadow: var(--shadow);
+  }
+  .stat .label { font-size: 12px; color: var(--ink-muted); }
+  .stat .value {
+    font-size: 22px;
+    font-weight: 650;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  .stat .value.good { color: var(--good); }
+  .stat .value.critical { color: var(--critical); }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    padding: 18px 20px 8px;
+  }
+
+  .card h2 {
+    margin: 0 0 4px;
+    font-size: 14.5px;
+    font-weight: 650;
+  }
+  .card .card-sub {
+    margin: 0 0 14px;
+    font-size: 12.5px;
+    color: var(--ink-muted);
+  }
+
+  .legend-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 12px;
+    color: var(--ink-2);
+    padding: 0 2px 6px;
+  }
+  .legend-item { display: inline-flex; align-items: center; gap: 6px; }
+  .legend-swatch-line { width: 14px; height: 2px; border-radius: 1px; background: var(--price); display: inline-block; }
+  .legend-swatch-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--entry); display: inline-block; box-shadow: 0 0 0 2px var(--ring); }
+  .chart-wrap { position: relative; }
+  svg.chart { display: block; width: 100%; height: auto; overflow: visible; }
+  svg text { fill: var(--ink-muted); font-size: 11px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+  .crosshair-line { stroke: var(--ink-muted); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0; pointer-events: none; }
+  .hit-layer { fill: transparent; cursor: crosshair; }
+
+  .tooltip {
+    position: absolute;
+    top: 0; left: 0;
+    transform: translate(-1000px, -1000px);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    padding: 10px 12px;
+    font-size: 12px;
+    min-width: 176px;
+    pointer-events: none;
+    z-index: 5;
+    transition: transform .04s linear;
+  }
+  .tooltip .t-time { font-size: 11px; color: var(--ink-muted); margin-bottom: 6px; }
+  .tooltip .t-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 2px 0; }
+  .tooltip .t-key { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
+  .tooltip .t-key::before { content: ""; width: 10px; height: 2px; border-radius: 1px; background: currentColor; }
+  .tooltip .t-key.price { color: var(--price); }
+  .tooltip .t-key.rsi { color: var(--rsi); }
+  .tooltip .t-key.vol { color: var(--ink-muted); }
+  .tooltip .t-val { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tooltip .t-flag {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
+    color: var(--entry);
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  table.entries {
+    width: 100%;
+    min-width: 560px;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  table.entries th {
+    text-align: right;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--ink-muted);
+    font-weight: 600;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--grid);
+    white-space: nowrap;
+  }
+  table.entries th:first-child, table.entries td:first-child { text-align: left; }
+  table.entries td {
+    text-align: right;
+    padding: 10px 10px;
+    border-bottom: 1px solid var(--grid);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  table.entries tbody tr { border-left: 3px solid var(--entry); }
+  table.entries tbody tr td:first-child { border-left: none; }
+  table.entries td.good { color: var(--good); }
+  table.entries td.critical { color: var(--critical); }
+  .table-scroll { overflow-x: auto; }
+
+  footer.note {
+    font-size: 12.5px;
+    color: var(--ink-muted);
+    line-height: 1.6;
+    border-top: 1px solid var(--grid);
+    padding-top: 16px;
+  }
+  footer.note code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    background: var(--grid);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 11.5px;
+  }
+
+  @media (max-width: 640px) {
+    .stats-row { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+
+<div class="page">
+
+  <header class="top">
+    <span class="eyebrow">Illustrative sample data</span>
+    <h1>BTC futures replay — RSI(14) &lt; 30 &amp; volume +200%</h1>
+    <p class="sub">
+      This is a preview of what <code>replay.js</code> reports, rendered against a
+      synthetic week of hourly candles (this sandbox can't reach Binance's API, so
+      no live history was fetched). Swap in a real run to see your own entries —
+      the chart, table, and stats below are all computed live from the sample
+      series using the exact same RSI / volume-spike logic as the script.
+    </p>
+  </header>
+
+  <section class="params-row" id="paramsRow"></section>
+
+  <section class="stats-row" id="statsRow"></section>
+
+  <section class="card">
+    <h2>Price — entries marked</h2>
+    <p class="card-sub">BTCUSDT · USDM perpetual (sample) · 1h candles</p>
+    <div class="legend-row">
+      <span class="legend-item"><span class="legend-swatch-line"></span>Price (close)</span>
+      <span class="legend-item"><span class="legend-swatch-dot"></span>Entry signal</span>
+    </div>
+    <div class="chart-wrap" id="chartWrap">
+      <svg class="chart" id="chart" viewBox="0 0 1016 572" preserveAspectRatio="none"></svg>
+      <div class="tooltip" id="tooltip"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Entry log</h2>
+    <p class="card-sub">One row per triggered entry, edge-detected (a multi-bar dip only counts once)</p>
+    <div class="table-scroll">
+      <table class="entries" id="entriesTable">
+        <thead>
+          <tr>
+            <th>Time (UTC)</th>
+            <th>Entry close</th>
+            <th>RSI(14)</th>
+            <th>Volume Δ</th>
+            <th>+4 bars</th>
+            <th>To now</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="note">
+    Run it on real data: <code>node replay.js --symbol=BTCUSDT --market=USDM --days=7 --interval=1h</code>.
+    Definitions match <code>lib.js</code> exactly — Wilder's RSI(14) on candle closes, and volume spike =
+    current candle volume vs. the average of the prior 20 candles. "+4 bars" / "To now" are computed after
+    the fact for context only; they play no part in the entry decision, so there's no lookahead in the signal itself.
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---- 1. Same RSI / volume-spike math as lib.js ----
+  function rsi(closes, period) {
+    if (closes.length < period + 1) return null;
+    let gains = 0, losses = 0;
+    for (let i = 1; i <= period; i++) {
+      const d = closes[i] - closes[i - 1];
+      if (d >= 0) gains += d; else losses -= d;
+    }
+    let avgGain = gains / period, avgLoss = losses / period;
+    for (let i = period + 1; i < closes.length; i++) {
+      const d = closes[i] - closes[i - 1];
+      const g = d > 0 ? d : 0, l = d < 0 ? -d : 0;
+      avgGain = (avgGain * (period - 1) + g) / period;
+      avgLoss = (avgLoss * (period - 1) + l) / period;
+    }
+    if (avgLoss === 0) return 100;
+    return 100 - 100 / (1 + avgGain / avgLoss);
+  }
+  function volumeSpikePct(volumes, lookback) {
+    if (volumes.length < lookback + 1) return null;
+    const current = volumes[volumes.length - 1];
+    const win = volumes.slice(-lookback - 1, -1);
+    const avg = win.reduce((a, b) => a + b, 0) / win.length;
+    if (avg === 0) return null;
+    return ((current - avg) / avg) * 100;
+  }
+
+  // ---- 2. Deterministic synthetic week (seeded PRNG, reproducible) ----
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function gaussian(rand) {
+    const u = 1 - rand(), v = rand();
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  }
+
+  const RSI_PERIOD = 14, VOL_LOOKBACK = 20, VOL_THRESHOLD = 200;
+  const N = 168; // 7 days * 24h
+  const shocks = [[62, 74], [130, 142]];
+  function inShock(i) { return shocks.find(([a, b]) => i >= a && i <= b); }
+
+  const rand = mulberry32(7);
+  const closes = [], volumes = [];
+  let price = 64500;
+  for (let i = 0; i < N; i++) {
+    const sh = inShock(i);
+    let extra = 0, volMult = 1;
+    if (sh) {
+      const [a, b] = sh, span = b - a, pos = (i - a) / span;
+      extra = -0.0135 * Math.sin(Math.PI * Math.min(pos * 1.05, 1));
+      const tail = Math.max(0, (pos - 0.55) / 0.45);
+      volMult = 1 + 6.5 * Math.pow(Math.min(tail, 1), 1.4);
+    }
+    const ret = 0.0002 + extra + gaussian(rand) * 0.0036;
+    price *= (1 + ret);
+    closes.push(price);
+    const baseVol = 1400 + gaussian(rand) * 120;
+    volumes.push(Math.max(200, baseVol * volMult * (1 + gaussian(rand) * 0.07)));
+  }
+
+  const END = Date.UTC(2026, 6, 31, 0, 0, 0);
+  const HOUR = 3600_000;
+  const times = closes.map((_, i) => END - (N - 1 - i) * HOUR);
+
+  // ---- 3. Bar-by-bar replay: RSI/vol computed only from data up to that bar ----
+  const rsiSeries = [], volPctSeries = [], signalSeries = [];
+  let prevSignal = false;
+  const entries = [];
+  for (let i = 0; i < N; i++) {
+    const r = rsi(closes.slice(0, i + 1), RSI_PERIOD);
+    const v = volumeSpikePct(volumes.slice(0, i + 1), VOL_LOOKBACK);
+    rsiSeries.push(r);
+    volPctSeries.push(v);
+    const signal = r !== null && v !== null && r < 30 && v >= VOL_THRESHOLD;
+    signalSeries.push(signal);
+    if (signal && !prevSignal) {
+      const f4 = closes[i + 4] != null ? ((closes[i + 4] - closes[i]) / closes[i]) * 100 : null;
+      const toNow = ((closes[N - 1] - closes[i]) / closes[i]) * 100;
+      entries.push({ i, time: times[i], close: closes[i], rsi: r, volPct: v, f4, toNow });
+    }
+    prevSignal = signal;
+  }
+
+  // ---- 4. Render: params + stats ----
+  const paramsRow = document.getElementById("paramsRow");
+  [
+    ["Symbol", "BTCUSDT · USDM"], ["Interval", "1h"], ["Window", "7d"],
+    ["RSI period", "14"], ["Vol lookback", "20"], ["Vol threshold", "+200%"],
+  ].forEach(([k, v]) => {
+    const pill = document.createElement("span");
+    pill.className = "pill";
+    const b = document.createElement("b");
+    b.textContent = v;
+    pill.appendChild(document.createTextNode(k + " "));
+    pill.appendChild(b);
+    paramsRow.appendChild(pill);
+  });
+
+  const hits = entries.filter((e) => e.toNow > 0).length;
+  const hitRate = entries.length ? Math.round((hits / entries.length) * 100) : 0;
+  const avgRsi = entries.length ? entries.reduce((a, e) => a + e.rsi, 0) / entries.length : null;
+  const avgVol = entries.length ? entries.reduce((a, e) => a + e.volPct, 0) / entries.length : null;
+
+  const statsRow = document.getElementById("statsRow");
+  function stat(label, value, cls) {
+    const el = document.createElement("div");
+    el.className = "stat";
+    const l = document.createElement("div"); l.className = "label"; l.textContent = label;
+    const v = document.createElement("div"); v.className = "value" + (cls ? " " + cls : ""); v.textContent = value;
+    el.append(l, v);
+    statsRow.appendChild(el);
+  }
+  stat("Entries found", String(entries.length));
+  stat("Hit rate (to now)", entries.length ? hitRate + "%" : "—", hitRate >= 50 ? "good" : "critical");
+  stat("Avg RSI at entry", avgRsi != null ? avgRsi.toFixed(1) : "—");
+  stat("Avg volume spike", avgVol != null ? "+" + avgVol.toFixed(0) + "%" : "—");
+
+  // ---- 5. Chart geometry ----
+  const GUTTER = 56, W = 1016, PLOT_W = W - GUTTER;
+  const PRICE_TOP = 8, PRICE_H = 280;
+  const RSI_TOP = PRICE_TOP + PRICE_H + 24, RSI_H = 100;
+  const VOL_TOP = RSI_TOP + RSI_H + 24, VOL_H = 100;
+  const CHART_H = VOL_TOP + VOL_H + 8;
+
+  const svg = document.getElementById("chart");
+  svg.setAttribute("viewBox", `0 0 ${W} ${CHART_H}`);
+
+  const NS = "http://www.w3.org/2000/svg";
+  function el(tag, attrs) {
+    const e = document.createElementNS(NS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+
+  const xAt = (i) => GUTTER + (i / (N - 1)) * PLOT_W;
+
+  const priceMin = Math.min(...closes), priceMax = Math.max(...closes);
+  const pPad = (priceMax - priceMin) * 0.08;
+  const yPrice = (v) => PRICE_TOP + PRICE_H - ((v - (priceMin - pPad)) / ((priceMax - priceMin) + 2 * pPad)) * PRICE_H;
+
+  const yRsi = (v) => RSI_TOP + RSI_H - (v / 100) * RSI_H;
+
+  const volMax = Math.max(...volumes);
+  const yVolTop = (v) => VOL_TOP + VOL_H - (v / volMax) * VOL_H;
+
+  // gridlines + axis labels (price)
+  const priceTicks = 4;
+  for (let t = 0; t <= priceTicks; t++) {
+    const val = priceMin - pPad + ((priceMax - priceMin + 2 * pPad) * t) / priceTicks;
+    const y = yPrice(val);
+    svg.appendChild(el("line", { x1: GUTTER, x2: W, y1: y, y2: y, stroke: "var(--grid)", "stroke-width": 1 }));
+    const label = el("text", { x: GUTTER - 8, y: y + 3, "text-anchor": "end" });
+    label.textContent = "$" + Math.round(val).toLocaleString("en-US");
+    svg.appendChild(label);
+  }
+
+  // price area + line
+  let areaD = `M ${xAt(0)} ${yPrice(closes[0])}`;
+  let lineD = `M ${xAt(0)} ${yPrice(closes[0])}`;
+  for (let i = 1; i < N; i++) {
+    areaD += ` L ${xAt(i)} ${yPrice(closes[i])}`;
+    lineD += ` L ${xAt(i)} ${yPrice(closes[i])}`;
+  }
+  areaD += ` L ${xAt(N - 1)} ${PRICE_TOP + PRICE_H} L ${xAt(0)} ${PRICE_TOP + PRICE_H} Z`;
+  svg.appendChild(el("path", { d: areaD, fill: "var(--price-fill)", stroke: "none" }));
+  svg.appendChild(el("path", { d: lineD, fill: "none", stroke: "var(--price)", "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+
+  // Panel titles + inline legend keys (drawn as SVG text so they sit right at
+  // each panel's top edge, not stacked after the whole chart in HTML flow).
+  function panelHeader(y, title, keys) {
+    const t = el("text", { x: GUTTER, y: y - 10, "text-anchor": "start", "font-weight": "600", fill: "var(--ink-2)" });
+    t.setAttribute("style", "text-transform:uppercase; letter-spacing:.04em; font-size:10.5px;");
+    t.textContent = title;
+    svg.appendChild(t);
+
+    let cursorRight = W;
+    const KEY_GAP = 16, SWATCH_GAP = 6, SWATCH_W = 9;
+    keys.slice().reverse().forEach(({ label, color, dashed }) => {
+      const labelEl = el("text", { y: y - 10, "text-anchor": "end", fill: "var(--ink-muted)", "font-size": "10.5px" });
+      labelEl.textContent = label;
+      svg.appendChild(labelEl);
+      const textWidth = labelEl.getBBox().width;
+      labelEl.setAttribute("x", cursorRight);
+      const swatchRight = cursorRight - textWidth - SWATCH_GAP;
+      if (dashed) {
+        svg.appendChild(el("line", { x1: swatchRight - SWATCH_W, x2: swatchRight, y1: y - 13, y2: y - 13, stroke: color, "stroke-width": 2, "stroke-dasharray": "2 2" }));
+      } else {
+        svg.appendChild(el("rect", { x: swatchRight - SWATCH_W, y: y - 17, width: 8, height: 8, rx: 2, fill: color }));
+      }
+      cursorRight = swatchRight - SWATCH_W - KEY_GAP;
+    });
+  }
+  panelHeader(RSI_TOP, "RSI (14)", [{ label: "oversold < 30", color: "var(--rsi-line)", dashed: true }]);
+  panelHeader(VOL_TOP, "Volume", [
+    { label: "entry bar", color: "var(--entry)" },
+    { label: "normal", color: "var(--ink-muted)" },
+  ]);
+
+  // RSI zone + line + threshold
+  svg.appendChild(el("rect", { x: GUTTER, y: yRsi(30), width: PLOT_W, height: RSI_H - (yRsi(30) - RSI_TOP), fill: "var(--rsi-zone)" }));
+  [0, 30, 70, 100].forEach((t) => {
+    const y = yRsi(t);
+    svg.appendChild(el("line", {
+      x1: GUTTER, x2: W, y1: y, y2: y, stroke: t === 30 ? "var(--rsi-line)" : "var(--grid)",
+      "stroke-width": 1, "stroke-dasharray": t === 30 ? "3 3" : "0", opacity: t === 30 ? 0.6 : 1,
+    }));
+    const label = el("text", { x: GUTTER - 8, y: y + 3, "text-anchor": "end" });
+    label.textContent = String(t);
+    svg.appendChild(label);
+  });
+  let rsiD = null;
+  for (let i = 0; i < N; i++) {
+    if (rsiSeries[i] == null) continue;
+    rsiD = rsiD === null ? `M ${xAt(i)} ${yRsi(rsiSeries[i])}` : rsiD + ` L ${xAt(i)} ${yRsi(rsiSeries[i])}`;
+  }
+  svg.appendChild(el("path", { d: rsiD, fill: "none", stroke: "var(--rsi)", "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+
+  // Volume bars
+  const barW = Math.max(1.4, (PLOT_W / N) - 1.2);
+  for (let i = 0; i < N; i++) {
+    const isEntryBar = entries.some((e) => e.i === i);
+    const x = xAt(i) - barW / 2;
+    svg.appendChild(el("rect", {
+      x, y: yVolTop(volumes[i]), width: barW, height: VOL_TOP + VOL_H - yVolTop(volumes[i]),
+      rx: 1.5, fill: isEntryBar ? "var(--entry)" : "var(--ink-muted)", opacity: isEntryBar ? 1 : 0.4,
+    }));
+  }
+  const volTick = el("text", { x: GUTTER - 8, y: VOL_TOP + 8, "text-anchor": "end" });
+  volTick.textContent = Math.round(volMax).toLocaleString("en-US");
+  svg.appendChild(volTick);
+  const volTickBase = el("text", { x: GUTTER - 8, y: VOL_TOP + VOL_H, "text-anchor": "end" });
+  volTickBase.textContent = "0";
+  svg.appendChild(volTickBase);
+
+  // Entry markers on price panel + vertical guides spanning all 3 panels
+  entries.forEach((e) => {
+    const x = xAt(e.i);
+    svg.appendChild(el("line", {
+      x1: x, x2: x, y1: PRICE_TOP, y2: VOL_TOP + VOL_H,
+      stroke: "var(--entry)", "stroke-width": 1, "stroke-dasharray": "2 3", opacity: 0.5,
+    }));
+    svg.appendChild(el("circle", { cx: x, cy: yPrice(e.close), r: 6, fill: "var(--entry)", stroke: "var(--ring)", "stroke-width": 2 }));
+  });
+
+  // x-axis time labels (weekly ticks every 24 bars)
+  for (let i = 0; i < N; i += 24) {
+    const d = new Date(times[i]);
+    const label = el("text", { x: xAt(i), y: VOL_TOP + VOL_H + 16, "text-anchor": "middle" });
+    label.textContent = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    svg.appendChild(label);
+  }
+
+  // shared crosshair
+  const crosshair = el("line", Object.assign({ class: "crosshair-line" }, { y1: PRICE_TOP, y2: VOL_TOP + VOL_H, x1: GUTTER, x2: GUTTER }));
+  svg.appendChild(crosshair);
+
+  const hitLayer = el("rect", { class: "hit-layer", x: GUTTER, y: 0, width: PLOT_W, height: CHART_H });
+  svg.appendChild(hitLayer);
+
+  // ---- 6. Tooltip / hover ----
+  const tooltip = document.getElementById("tooltip");
+  const wrap = document.getElementById("chartWrap");
+
+  function fmtTime(ms) {
+    return new Date(ms).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "UTC" }) + " UTC";
+  }
+  function fmtUsd(v) { return "$" + v.toLocaleString("en-US", { maximumFractionDigits: 0 }); }
+
+  function showTooltip(i, clientX, clientY) {
+    tooltip.innerHTML = "";
+    const timeEl = document.createElement("div"); timeEl.className = "t-time"; timeEl.textContent = fmtTime(times[i]);
+    tooltip.appendChild(timeEl);
+
+    function row(keyClass, keyText, valText) {
+      const r = document.createElement("div"); r.className = "t-row";
+      const k = document.createElement("span"); k.className = "t-key " + keyClass; k.textContent = keyText;
+      const v = document.createElement("span"); v.className = "t-val"; v.textContent = valText;
+      r.append(k, v);
+      tooltip.appendChild(r);
+    }
+    row("price", "Price", fmtUsd(closes[i]));
+    row("rsi", "RSI(14)", rsiSeries[i] != null ? rsiSeries[i].toFixed(1) : "—");
+    row("vol", "Volume Δ", volPctSeries[i] != null ? (volPctSeries[i] >= 0 ? "+" : "") + volPctSeries[i].toFixed(0) + "%" : "—");
+
+    if (signalSeries[i]) {
+      const flag = document.createElement("div"); flag.className = "t-flag"; flag.textContent = "Entry condition met";
+      tooltip.appendChild(flag);
+    }
+
+    const wrapRect = wrap.getBoundingClientRect();
+    let left = clientX - wrapRect.left + 14;
+    let top = clientY - wrapRect.top - 12;
+    const maxLeft = wrapRect.width - 190;
+    if (left > maxLeft) left = clientX - wrapRect.left - 190 - 14;
+    tooltip.style.transform = `translate(${left}px, ${Math.max(0, top)}px)`;
+  }
+  function hideTooltip() { tooltip.style.transform = "translate(-1000px, -1000px)"; }
+
+  hitLayer.addEventListener("pointermove", (ev) => {
+    const rect = svg.getBoundingClientRect();
+    const scaleX = W / rect.width;
+    const localX = (ev.clientX - rect.left) * scaleX;
+    const i = Math.round(((localX - GUTTER) / PLOT_W) * (N - 1));
+    const clamped = Math.max(0, Math.min(N - 1, i));
+    const x = xAt(clamped);
+    crosshair.setAttribute("x1", x); crosshair.setAttribute("x2", x);
+    crosshair.style.opacity = 1;
+    showTooltip(clamped, ev.clientX, ev.clientY);
+  });
+  hitLayer.addEventListener("pointerleave", () => { crosshair.style.opacity = 0; hideTooltip(); });
+
+  // ---- 7. Entries table ----
+  const tbody = document.querySelector("#entriesTable tbody");
+  entries.forEach((e) => {
+    const tr = document.createElement("tr");
+    function td(text, cls) {
+      const cell = document.createElement("td");
+      if (cls) cell.className = cls;
+      cell.textContent = text;
+      tr.appendChild(cell);
+    }
+    td(fmtTime(e.time));
+    td(fmtUsd(e.close));
+    td(e.rsi.toFixed(1));
+    td("+" + e.volPct.toFixed(0) + "%");
+    td(e.f4 != null ? (e.f4 >= 0 ? "+" : "") + e.f4.toFixed(2) + "%" : "n/a", e.f4 != null ? (e.f4 >= 0 ? "good" : "critical") : "");
+    td((e.toNow >= 0 ? "+" : "") + e.toNow.toFixed(2) + "%", e.toNow >= 0 ? "good" : "critical");
+    tbody.appendChild(tr);
+  });
+  if (entries.length === 0) {
+    const tr = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 6; cell.style.textAlign = "center"; cell.style.color = "var(--ink-muted)";
+    cell.textContent = "No entries in this window.";
+    tr.appendChild(cell);
+    tbody.appendChild(tr);
+  }
+})();
+</script>
