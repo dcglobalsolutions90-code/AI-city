@@ -88,4 +88,79 @@ function volumeSpikePct(volumes, lookback) {
   return ((current - avg) / avg) * 100;
 }
 
-module.exports = { listBtcSymbols, resolveSymbolMeta, getKlines, rsi, volumeSpikePct };
+const INTERVAL_MS = {
+  "1m": 60_000,
+  "3m": 3 * 60_000,
+  "5m": 5 * 60_000,
+  "15m": 15 * 60_000,
+  "30m": 30 * 60_000,
+  "1h": 60 * 60_000,
+  "2h": 2 * 60 * 60_000,
+  "4h": 4 * 60 * 60_000,
+  "6h": 6 * 60 * 60_000,
+  "8h": 8 * 60 * 60_000,
+  "12h": 12 * 60 * 60_000,
+  "1d": 24 * 60 * 60_000,
+  "3d": 3 * 24 * 60 * 60_000,
+  "1w": 7 * 24 * 60 * 60_000,
+};
+
+// How many candles to request so a `days`-wide window has enough leading
+// history for RSI/volume-lookback warmup. Binance caps a single kline
+// request at 1500 candles.
+function requiredBars({ interval, days, rsiPeriod, volLookback }) {
+  const intervalMs = INTERVAL_MS[interval];
+  if (!intervalMs) throw new Error(`Unknown interval "${interval}"`);
+  const barsInWindow = Math.ceil((days * 24 * 60 * 60_000) / intervalMs);
+  const warmupBars = Math.max(rsiPeriod, volLookback) + 5;
+  return { barsInWindow, warmupBars, total: Math.min(barsInWindow + warmupBars, 1500) };
+}
+
+// Bar-by-bar RSI / volume-spike / signal series. Each index only ever uses
+// data up to and including that bar - no lookahead.
+function buildSeries(klines, { rsiPeriod, volLookback, volThreshold }) {
+  const times = klines.map((k) => k.openTime);
+  const closes = klines.map((k) => k.close);
+  const volumes = klines.map((k) => k.volume);
+  const rsiSeries = [];
+  const volPctSeries = [];
+  const signalSeries = [];
+  for (let i = 0; i < closes.length; i++) {
+    const r = rsi(closes.slice(0, i + 1), rsiPeriod);
+    const v = volumeSpikePct(volumes.slice(0, i + 1), volLookback);
+    rsiSeries.push(r);
+    volPctSeries.push(v);
+    signalSeries.push(r !== null && v !== null && r < 30 && v >= volThreshold);
+  }
+  return { times, closes, volumes, rsiSeries, volPctSeries, signalSeries };
+}
+
+// Edge-triggered entries: the first bar of each signal run, not every bar
+// while it holds. Optionally restricted to bars at/after windowStartIdx.
+function detectEntries(series, { windowStartIdx = 0 } = {}) {
+  const { times, closes, rsiSeries, volPctSeries, signalSeries } = series;
+  const entries = [];
+  let prevSignal = false;
+  for (let i = 0; i < signalSeries.length; i++) {
+    const signal = signalSeries[i];
+    if (signal && !prevSignal && i >= windowStartIdx) {
+      const f4 = closes[i + 4] != null ? ((closes[i + 4] - closes[i]) / closes[i]) * 100 : null;
+      const toNow = ((closes[closes.length - 1] - closes[i]) / closes[i]) * 100;
+      entries.push({ i, time: times[i], close: closes[i], rsi: rsiSeries[i], volPct: volPctSeries[i], f4, toNow });
+    }
+    prevSignal = signal;
+  }
+  return entries;
+}
+
+module.exports = {
+  listBtcSymbols,
+  resolveSymbolMeta,
+  getKlines,
+  rsi,
+  volumeSpikePct,
+  INTERVAL_MS,
+  requiredBars,
+  buildSeries,
+  detectEntries,
+};

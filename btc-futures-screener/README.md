@@ -7,11 +7,13 @@ Scans:
 - USDT/USDC-margined BTC futures (perpetual + quarterly delivery) via `fapi.binance.com`
 - Coin-margined BTC futures (perpetual + quarterly delivery) via `dapi.binance.com`
 
-Two scripts share this logic (`lib.js`):
+Four scripts share this logic (`lib.js`):
 
 - `screener.js` - checks the condition right now, across all BTC futures contracts.
 - `replay.js` - walks back over recent history and reports every bar where the
   condition would have triggered an entry (bar-by-bar, no lookahead).
+- `dashboard-server.js` + `dashboard.html` - a live local dashboard on a port
+  on your machine (see below).
 
 ## Usage
 
@@ -55,6 +57,46 @@ the signal.
 
 Consecutive bars that all satisfy the condition count as a single entry (the
 first bar where it turns true) rather than one entry per bar.
+
+### Live dashboard (local port)
+
+```
+node dashboard-server.js
+```
+
+Then open **http://localhost:8787**. The server refetches Binance every 60s
+(`--refreshSeconds`) and caches the result; the page polls the server every
+15s and re-renders without a full reload, so it stays live in the browser.
+A "Rescan now" button forces an immediate refresh. If a fetch fails, the page
+shows a stale/error banner but keeps the last good chart and tables on
+screen rather than blanking out.
+
+```
+node dashboard-server.js --port=8787 --symbol=BTCUSDT --market=USDM \
+  --interval=1h --days=7 --rsiPeriod=14 --volLookback=20 --volThreshold=200 \
+  --refreshSeconds=60
+```
+
+Same flags as `replay.js`/`screener.js`, plus:
+
+- `--port`: local port to serve on (default `8787`)
+- `--refreshSeconds`: how often the server refetches Binance (default `60`)
+
+The dashboard shows three things at once: a **live screen** across every BTC
+futures contract (the current, real-time version of `screener.js`), a
+**price/RSI/volume chart** with entry markers and a hover crosshair for the
+configured symbol, and an **entry log** table for that symbol over the
+configured window — all computed with the exact same `lib.js` functions as
+the CLI scripts. Stop it with Ctrl+C in its terminal.
+
+Verified in this sandbox: the server starts, serves the page, and correctly
+shows a "Connecting" → "Error" state with the underlying Binance error
+message when a fetch fails (same network restriction as `screener.js` /
+`replay.js` here). The full "Live" rendering path — chart, hover tooltip,
+live-match table, entry log, light/dark themes — was verified against a mock
+backend serving real synthetic data through the actual `dashboard.html`, so
+the only thing missing in this sandbox is outbound network access to
+Binance; on your machine it renders real data the same way.
 
 ## Definitions
 

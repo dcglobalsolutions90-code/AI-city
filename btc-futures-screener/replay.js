@@ -20,7 +20,7 @@
  * data only.
  */
 
-const { listBtcSymbols, resolveSymbolMeta, getKlines, rsi, volumeSpikePct } = require("./lib");
+const { listBtcSymbols, resolveSymbolMeta, getKlines, requiredBars, buildSeries, detectEntries } = require("./lib");
 
 const args = Object.fromEntries(
   process.argv.slice(2).map((a) => {
@@ -38,33 +38,10 @@ const VOL_LOOKBACK = Number(args.volLookback || 20);
 const VOL_THRESHOLD_PCT = Number(args.volThreshold || 200);
 const SCAN_ALL = Boolean(args.all);
 
-const INTERVAL_MS = {
-  "1m": 60_000,
-  "3m": 3 * 60_000,
-  "5m": 5 * 60_000,
-  "15m": 15 * 60_000,
-  "30m": 30 * 60_000,
-  "1h": 60 * 60_000,
-  "2h": 2 * 60 * 60_000,
-  "4h": 4 * 60 * 60_000,
-  "6h": 6 * 60 * 60_000,
-  "8h": 8 * 60 * 60_000,
-  "12h": 12 * 60 * 60_000,
-  "1d": 24 * 60 * 60_000,
-  "3d": 3 * 24 * 60 * 60_000,
-  "1w": 7 * 24 * 60 * 60_000,
-};
-
-function requiredBars() {
-  const intervalMs = INTERVAL_MS[INTERVAL];
-  if (!intervalMs) throw new Error(`Unknown interval "${INTERVAL}"`);
-  const barsInWindow = Math.ceil((DAYS * 24 * 60 * 60_000) / intervalMs);
-  const warmupBars = Math.max(RSI_PERIOD, VOL_LOOKBACK) + 5;
-  return { barsInWindow, warmupBars, total: Math.min(barsInWindow + warmupBars, 1500) };
-}
-
 async function replaySymbol(symMeta) {
-  const { barsInWindow, warmupBars, total } = requiredBars();
+  const { barsInWindow, warmupBars, total } = requiredBars({
+    interval: INTERVAL, days: DAYS, rsiPeriod: RSI_PERIOD, volLookback: VOL_LOOKBACK,
+  });
   const klines = await getKlines(symMeta, { interval: INTERVAL, limit: total });
 
   if (klines.length < warmupBars + 1) {
@@ -72,39 +49,18 @@ async function replaySymbol(symMeta) {
   }
 
   const windowStartIdx = Math.max(0, klines.length - barsInWindow);
-  const closes = klines.map((k) => k.close);
-  const volumes = klines.map((k) => k.volume);
+  const series = buildSeries(klines, { rsiPeriod: RSI_PERIOD, volLookback: VOL_LOOKBACK, volThreshold: VOL_THRESHOLD_PCT });
 
-  const entries = [];
-  let prevSignal = false;
-
-  for (let i = 0; i < klines.length; i++) {
-    if (i < Math.max(RSI_PERIOD, VOL_LOOKBACK)) continue;
-
-    const rsiValue = rsi(closes.slice(0, i + 1), RSI_PERIOD);
-    const volPct = volumeSpikePct(volumes.slice(0, i + 1), VOL_LOOKBACK);
-    if (rsiValue === null || volPct === null) continue;
-
-    const signal = rsiValue < 30 && volPct >= VOL_THRESHOLD_PCT;
-
-    if (signal && !prevSignal && i >= windowStartIdx) {
-      const forward4 = closes[i + 4] != null ? ((closes[i + 4] - closes[i]) / closes[i]) * 100 : null;
-      const forwardToNow = ((closes[closes.length - 1] - closes[i]) / closes[i]) * 100;
-
-      entries.push({
-        time: new Date(klines[i].openTime).toISOString(),
-        symbol: symMeta.symbol,
-        market: symMeta.market,
-        entryClose: closes[i],
-        rsi: Number(rsiValue.toFixed(2)),
-        volumeChangePct: Number(volPct.toFixed(1)),
-        "+4barsPct": forward4 !== null ? Number(forward4.toFixed(2)) : "n/a",
-        toNowPct: Number(forwardToNow.toFixed(2)),
-      });
-    }
-
-    prevSignal = signal;
-  }
+  const entries = detectEntries(series, { windowStartIdx }).map((e) => ({
+    time: new Date(e.time).toISOString(),
+    symbol: symMeta.symbol,
+    market: symMeta.market,
+    entryClose: e.close,
+    rsi: Number(e.rsi.toFixed(2)),
+    volumeChangePct: Number(e.volPct.toFixed(1)),
+    "+4barsPct": e.f4 !== null ? Number(e.f4.toFixed(2)) : "n/a",
+    toNowPct: Number(e.toNow.toFixed(2)),
+  }));
 
   return { symbol: symMeta.symbol, market: symMeta.market, entries };
 }
